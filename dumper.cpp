@@ -1,8 +1,10 @@
-#include <windows.h>
+// dllmain.cpp : Defines the entry point for the DLL application.
+#include "pch.h"
 #include <Python.h>
 #include <TlHelp32.h>
 #include <fstream>
 #include <array>
+#include <iostream>
 
 DWORD GetProcessId(std::wstring);
 
@@ -13,15 +15,16 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 {
     switch (ul_reason_for_call)
     {
-    case DLL_PROCESS_ATTACH:
-        HWND hwnd = GetConsoleWindow();
-        // Add something the process name will contain 
+    case DLL_PROCESS_ATTACH: {
 
-        DWORD proc_id = GetProcessId(std::wstring(L"PROC"));
+        HWND hwnd = GetConsoleWindow();
+
+        // Add something the process name will contain 
+        DWORD proc_id = GetProcessId(std::wstring(L"main.exe"));
         HANDLE handle = OpenProcess(PROCESS_ALL_ACCESS, false, proc_id);
 
-        // Offset of the PyObject* you want to dump
-        long long offset = 0x2A747AA01F0;
+        // offset of the pyobject you want to dump
+        uint64_t offset = 0x1C5EC0425E0;
         PyObject* object = reinterpret_cast<PyObject*>(offset);
 
         size_t bytes_read;
@@ -30,22 +33,39 @@ BOOL APIENTRY DllMain( HMODULE hModule,
         std::array<unsigned char, sizeof(PyObject*) + 1> buffer{};
 
         // The ReadProcessMemory will check if it can read from the offsets location
-        if (ReadProcessMemory(handle, (LPVOID)(offset), (LPVOID)buffer.data(), sizeof(PyObject*), &bytes_read)) {
-            std::ofstream file("dumped_pyobject.bin");
+        if (ReadProcessMemory(handle, (LPVOID)(offset), (LPVOID)buffer.data(), sizeof(PyObject*), &bytes_read))
+        {
+            std::cout << "\n[PyObjDmp] Valid offset was read." << std::endl;
 
-            PyObject* _str = PyObject_Str(object);
-            const char* data = PyUnicode_AsUTF8(_str);
+            PyObject* repr = PyObject_Repr(object);
+            PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
+            const char* bytes = PyBytes_AS_STRING(str);
+            
+            
+            if (!bytes)
+            {
+                MessageBeep(MB_ICONERROR);
+                std::cout << "[PyObjDmp] PyObject* Returned NULL." << std::endl;
+                (void)MessageBoxA(hwnd, "Failure getting the PyObject pointer | NULL BYTES", "PyObjDmp", MB_ICONERROR);
+            }
 
-            file.write(data, strlen(data));
-            file.close();
+            else
+            {
+                std::cout << "[PyObjDmp] Received " << strlen(bytes) << "bytes from this PyObject." << std::endl;
+                std::ofstream file("dumped_pyobject.bin");
+                file.write(bytes, strlen(bytes));
+                file.close();
 
-            MessageBoxA(hwnd, "Successfully Dumped PyObject", "PyObjDmp", MB_OK);
+                (void)MessageBoxA(hwnd, "Successfully Dumped PyObject", "PyObjDmp", MB_OK);
+            }
         }
         // If it can't, obviously we cannot get it.
-        else {
+        else
+        {
             (void)MessageBoxA(hwnd, "Failure getting the PyObject pointer | Invalid Offset", "PyObjDmp", MB_ICONERROR);
         }
-
+        break;
+    }
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
